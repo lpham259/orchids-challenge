@@ -1,4 +1,3 @@
-# backend/app/services/scraper.py
 import asyncio
 import base64
 import json
