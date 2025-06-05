@@ -1,0 +1,137 @@
+{
+  "url": "https://example.com",
+  "title": "Example Domain",
+  "screenshot_base64": "[34572 characters]",
+  "dom_structure": {
+    "structure": {
+      "tag": "body",
+      "attributes": {},
+      "children": [
+        {
+          "tag": "div",
+          "attributes": {},
+          "children": [
+            {
+              "tag": "h1",
+              "attributes": {},
+              "children": []
+            },
+            {
+              "tag": "p",
+              "attributes": {},
+              "children": []
+            },
+            {
+              "tag": "p",
+              "attributes": {},
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    "text_content": "Example Domain Example Domain This domain is for use in illustrative examples in documents. You may use this\n    domain in literature without prior coordination or asking for permission. More information...",
+    "links": [
+      {
+        "text": "More information...",
+        "href": "https://www.iana.org/domains/example"
+      }
+    ],
+    "images": []
+  },
+  "styles": {
+    "body": {
+      "color": "rgb(0, 0, 0)",
+      "backgroundColor": "rgb(240, 240, 242)",
+      "fontSize": "16px",
+      "fontFamily": "-apple-system, system-ui, \"system-ui\", \"Segoe UI\", \"Open Sans\", \"Helvetica Neue\", Helvetica, Arial, sans-serif",
+      "fontWeight": "400",
+      "margin": "0px",
+      "padding": "0px",
+      "border": "0px none rgb(0, 0, 0)",
+      "borderRadius": "0px",
+      "display": "block",
+      "position": "static",
+      "width": "1280px",
+      "height": "230.875px"
+    },
+    "h1": {
+      "color": "rgb(0, 0, 0)",
+      "backgroundColor": "rgba(0, 0, 0, 0)",
+      "fontSize": "32px",
+      "fontFamily": "-apple-system, system-ui, \"system-ui\", \"Segoe UI\", \"Open Sans\", \"Helvetica Neue\", Helvetica, Arial, sans-serif",
+      "fontWeight": "700",
+      "margin": "21.44px 0px",
+      "padding": "0px",
+      "border": "0px none rgb(0, 0, 0)",
+      "borderRadius": "0px",
+      "display": "block",
+      "position": "static",
+      "width": "600px",
+      "height": "38px"
+    },
+    "p": {
+      "color": "rgb(0, 0, 0)",
+      "backgroundColor": "rgba(0, 0, 0, 0)",
+      "fontSize": "16px",
+      "fontFamily": "-apple-system, system-ui, \"system-ui\", \"Segoe UI\", \"Open Sans\", \"Helvetica Neue\", Helvetica, Arial, sans-serif",
+      "fontWeight": "400",
+      "margin": "16px 0px",
+      "padding": "0px",
+      "border": "0px none rgb(0, 0, 0)",
+      "borderRadius": "0px",
+      "display": "block",
+      "position": "static",
+      "width": "600px",
+      "height": "18px"
+    },
+    "a": {
+      "color": "rgb(56, 72, 143)",
+      "backgroundColor": "rgba(0, 0, 0, 0)",
+      "fontSize": "16px",
+      "fontFamily": "-apple-system, system-ui, \"system-ui\", \"Segoe UI\", \"Open Sans\", \"Helvetica Neue\", Helvetica, Arial, sans-serif",
+      "fontWeight": "400",
+      "margin": "0px",
+      "padding": "0px",
+      "border": "0px none rgb(56, 72, 143)",
+      "borderRadius": "0px",
+      "display": "inline",
+      "position": "static",
+      "width": "auto",
+      "height": "auto"
+    }
+  },
+  "color_palette": [
+    "#f3f3f3",
+    "#1e1f23",
+    "#7c7c7d",
+    "#9a9ca2",
+    "#848484",
+    "#b4b4b4",
+    "#bcbcbc"
+  ],
+  "fonts": [
+    "Times",
+    "-apple-system, system-ui, \"system-ui\", \"Segoe UI\", \"Open Sans\", \"Helvetica Neue\", Helvetica, Arial, sans-serif"
+  ],
+  "layout_info": {
+    "viewport": {
+      "width": 1280,
+      "height": 720
+    },
+    "body": {
+      "width": 1280,
+      "height": 230.875,
+      "scrollHeight": 231
+    },
+    "sections": []
+  },
+  "meta_data": {
+    "title": "Example Domain",
+    "description": "",
+    "keywords": "",
+    "og": {},
+    "twitter": {},
+    "links": []
+  }
+}
