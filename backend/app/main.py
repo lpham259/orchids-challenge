@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .models import ScrapeRequest, ScrapeResponse
+from .scraper import scrape_website_basic
 
 app = FastAPI(title="Website Cloner MVP")
 
@@ -18,15 +19,19 @@ async def root():
 
 @app.post("/clone", response_model=ScrapeResponse)
 async def clone_website(request: ScrapeRequest):
-    # Placeholder - returns dummy HTML
-    dummy_html = f"""<!DOCTYPE html>
-<html>
-<head><title>Cloned: {request.url}</title></head>
-<body>
-    <h1>MVP Clone of {request.url}</h1>
-    <p>This is a placeholder. Real cloning coming soon!</p>
-</body>
-</html>"""
+    try:
+        html_content = await scrape_website_basic(request.url)
+        return ScrapeResponse(
+            success=True,
+            message="Website scraped successfully",
+            html=html_content
+        )
+    except Exception as e:
+        return ScrapeResponse(
+            success=False,
+            message=f"Error: {str(e)}",
+            html=None
+        )
     
     return ScrapeResponse(
         success=True,
