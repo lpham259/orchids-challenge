@@ -57,10 +57,51 @@ class WebsiteScraper:
         finally:
             await page.close()
 
+    # Add this method to your WebsiteScraper class in scraper.py
+
     async def _take_screenshot(self, page: Page) -> str:
-        """Take full page screenshot and encode as base64"""
-        screenshot_bytes = await page.screenshot(full_page=True, type="png")
-        return base64.b64encode(screenshot_bytes).decode()
+        """Take full page screenshot and encode as base64, with size limits for LLM"""
+        try:
+            # Take screenshot
+            screenshot_bytes = await page.screenshot(full_page=True, type="png")
+            
+            # Open with PIL to check/resize dimensions
+            from PIL import Image
+            import io
+            
+            image = Image.open(io.BytesIO(screenshot_bytes))
+            original_width, original_height = image.size
+            
+            print(f"📸 Original screenshot: {original_width}x{original_height}")
+            
+            # Claude's limit is 8000 pixels on any dimension
+            max_dimension = 7500  # Leave some buffer
+            
+            if original_width > max_dimension or original_height > max_dimension:
+                # Calculate resize ratio
+                ratio = min(max_dimension / original_width, max_dimension / original_height)
+                new_width = int(original_width * ratio)
+                new_height = int(original_height * ratio)
+                
+                print(f"🔄 Resizing to: {new_width}x{new_height} (ratio: {ratio:.2f})")
+                
+                # Resize image
+                resized_image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                
+                # Convert back to bytes
+                buffer = io.BytesIO()
+                resized_image.save(buffer, format="PNG", optimize=True, quality=85)
+                screenshot_bytes = buffer.getvalue()
+                
+                print(f"✅ Screenshot resized successfully")
+            else:
+                print(f"✅ Screenshot size OK, no resize needed")
+            
+            return base64.b64encode(screenshot_bytes).decode()
+            
+        except Exception as e:
+            print(f"⚠️ Screenshot error: {e}")
+            return ""  # Return empty string if screenshot fails
 
     async def _extract_dom_structure(self, page: Page) -> Dict[str, Any]:
         """Extract simplified DOM structure"""

@@ -43,8 +43,8 @@ class GenerationJob(BaseModel):
         if not data.get('id'):
             data['id'] = str(uuid.uuid4())
         if not data.get('created_at'):
-            data['created_at'] = datetime.utcnow()
-        data['updated_at'] = datetime.utcnow()
+            data['created_at'] = datetime.now()
+        data['updated_at'] = datetime.now()
         super().__init__(**data)
 
 class GenerationResponse(BaseModel):

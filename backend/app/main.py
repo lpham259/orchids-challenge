@@ -6,6 +6,9 @@ from typing import Dict, List
 import asyncio
 import os
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Import models and services
 from .models import (
@@ -13,6 +16,7 @@ from .models import (
     JobStatusResponse, JobStatus, ScrapedData
 )
 from app.scraper import WebsiteScraper
+from app.llm_generator import LLMGenerator
 
 # Create FastAPI instance
 app = FastAPI(
@@ -33,6 +37,15 @@ app.add_middleware(
 # In-memory storage for jobs (in production, use a database)
 jobs_db: Dict[str, GenerationJob] = {}
 
+# Initialize LLM service
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic")
+LLM_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+
+if not LLM_API_KEY:
+    print("Warning: No LLM API key found.")
+
+llm_generator = LLMGenerator(provider=LLM_PROVIDER, api_key=LLM_API_KEY) if LLM_API_KEY else None
+
 @app.get("/")
 async def root():
     return {
@@ -51,7 +64,9 @@ async def health_check():
     return {
         "status": "healthy", 
         "service": "website-cloner-api",
-        "scraper_available": True
+        "scraper_available": True,
+        "llm_configured": llm_generator is not None,
+        "llm_provider": LLM_PROVIDER if llm_generator else None
     }
 
 @app.post("/clone", response_model=GenerationResponse)
@@ -71,7 +86,7 @@ async def start_website_cloning(
     return GenerationResponse(
         job_id=job.id,
         status=job.status,
-        message="Website cloning started. Check status for progress."
+        message=f"Website cloning started. {'LLM Generation enabled.' if llm_generator else 'Using fallback mode - set ANTHROPIC_API_KEY for AI generation.'}"
     )
 
 @app.get("/status/{job_id}", response_model=JobStatusResponse)
@@ -195,7 +210,7 @@ async def process_website_cloning(job_id: str, request: ScrapeRequest):
     try:
         # Step 1: Update status to scraping
         job.status = JobStatus.SCRAPING
-        job.updated_at = datetime.utcnow()
+        job.updated_at = datetime.now()
         
         # Step 2: Scrape the website using enhanced scraper
         async with WebsiteScraper() as scraper:
@@ -204,27 +219,33 @@ async def process_website_cloning(job_id: str, request: ScrapeRequest):
         
         # Step 3: Update status to processing
         job.status = JobStatus.PROCESSING
-        job.updated_at = datetime.utcnow()
+        job.updated_at = datetime.now()
         
         # Small delay to show progress
         await asyncio.sleep(1)
         
         # Step 4: Update status to generating (for now, we'll create basic HTML)
         job.status = JobStatus.GENERATING
-        job.updated_at = datetime.utcnow()
+        job.updated_at = datetime.now()
         
-        # Step 5: Generate HTML (for now, enhanced version of scraped content)
-        job.generated_html = _create_enhanced_html(job.scraped_data)
+        # Step 5: Generate HTML using LLM or fallback
+        if llm_generator:
+            print(f"Using LLM generation for job {job_id}")
+            generated_html = await llm_generator.generate_html_clone(scraped_data_dict)
+            job.generated_html = generated_html
+        else:
+            print(f"Using fallback generation for job {job_id} (no LLM configured)")
+            job.generated_html = _create_enhanced_html(job.scraped_data)
         
         # Step 6: Mark as completed
         job.status = JobStatus.COMPLETED
-        job.updated_at = datetime.utcnow()
+        job.updated_at = datetime.now()
         
     except Exception as e:
         # Handle errors
         job.status = JobStatus.FAILED
         job.error_message = str(e)
-        job.updated_at = datetime.utcnow()
+        job.updated_at = datetime.now()
         print(f"Error processing job {job_id}: {e}")
 
 def _create_enhanced_html(scraped_data: ScrapedData) -> str:
