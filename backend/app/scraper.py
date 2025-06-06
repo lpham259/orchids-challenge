@@ -1,13 +1,11 @@
+# backend/app/services/scraper.py
 import asyncio
 import base64
-import json
 from typing import Optional, Dict, Any, List
 from playwright.async_api import async_playwright, Browser, Page
-from urllib.parse import urljoin, urlparse
 import colorthief
 from PIL import Image
 import io
-import re
 from bs4 import BeautifulSoup, Comment
 
 class WebsiteScraper:
@@ -26,10 +24,12 @@ class WebsiteScraper:
         await self.playwright.stop()
 
     async def scrape_website(self, url: str) -> Dict[str, Any]:
-        """SIMPLIFIED: Focus on getting one good screenshot + basic data"""
+        """Complete website scraping with PDF and screenshot capture"""
         page = await self.browser.new_page()
         
         try:
+            print(f"🌐 Scraping: {url}")
+            
             # Navigate to the page
             await page.goto(str(url), wait_until="networkidle", timeout=30000)
             await page.wait_for_load_state("domcontentloaded")
@@ -40,16 +40,21 @@ class WebsiteScraper:
             await page.evaluate("window.scrollTo(0, 0)")
             await asyncio.sleep(1)
             
-            # Take ONE high-quality hero screenshot
-            print("📸 Capturing hero section...")
+            # Capture visual data
+            print("📸 Capturing hero screenshot...")
             screenshot_base64 = await self._take_optimized_screenshot(page)
             
+            print("📄 Generating full page PDF...")
+            pdf_base64 = await self._generate_page_pdf(page)
+            
             # Extract other data
+            print("🔍 Extracting page data...")
             scraped_data = {
                 "url": str(url),
                 "title": await page.title(),
-                "screenshot_base64": screenshot_base64,  # Main screenshot
-                "screenshot_hero": screenshot_base64,    # For compatibility
+                "screenshot_base64": screenshot_base64,
+                "screenshot_hero": screenshot_base64,  # For compatibility
+                "pdf_base64": pdf_base64,
                 "dom_structure": await self._extract_dom_structure(page),
                 "styles": await self._extract_styles(page),
                 "color_palette": await self._extract_color_palette(page),
@@ -58,7 +63,12 @@ class WebsiteScraper:
                 "meta_data": await self._extract_meta_data(page)
             }
             
-            print(f"✅ Screenshot captured: {'Yes' if screenshot_base64 else 'Failed'}")
+            print(f"✅ Scraping complete:")
+            print(f"   📸 Screenshot: {'✅' if screenshot_base64 else '❌'}")
+            print(f"   📄 PDF: {'✅' if pdf_base64 else '❌'}")
+            print(f"   🎨 Colors: {len(scraped_data.get('color_palette', []))}")
+            print(f"   🔤 Fonts: {len(scraped_data.get('fonts', []))}")
+            
             return scraped_data
             
         except Exception as e:
@@ -67,34 +77,57 @@ class WebsiteScraper:
             await page.close()
 
     async def _take_optimized_screenshot(self, page: Page) -> str:
-        """Take one optimized screenshot for LLM analysis"""
+        """Take optimized hero section screenshot"""
         try:
-            # Take hero section screenshot (no quality parameter for PNG)
             screenshot_bytes = await page.screenshot(
                 type="png",
-                full_page=False  # Just viewport, not full page
+                full_page=False  # Just viewport/hero section
             )
             
-            # Optimize for Claude's limits
             return await self._optimize_screenshot_for_llm(screenshot_bytes)
             
         except Exception as e:
             print(f"⚠️ Screenshot error: {e}")
             return ""
 
+    async def _generate_page_pdf(self, page: Page) -> str:
+        """Generate PDF of the entire page"""
+        try:
+            pdf_bytes = await page.pdf(
+                format='A4',
+                print_background=True,        # Include background colors/images
+                margin={
+                    'top': '0.4in',
+                    'right': '0.4in', 
+                    'bottom': '0.4in',
+                    'left': '0.4in'
+                },
+                prefer_css_page_size=False,   # Use our format
+                scale=0.75                    # Fit more content
+            )
+            
+            pdf_size_mb = len(pdf_bytes) / (1024 * 1024)
+            print(f"📄 PDF generated: {len(pdf_bytes)//1024}KB ({pdf_size_mb:.1f}MB)")
+            
+            # Check size limits (Claude API has limits)
+            if pdf_size_mb > 32:  # Conservative limit
+                print(f"⚠️ PDF large ({pdf_size_mb:.1f}MB), may hit API limits")
+                
+            return base64.b64encode(pdf_bytes).decode()
+            
+        except Exception as e:
+            print(f"⚠️ PDF generation error: {e}")
+            return ""
+
     async def _optimize_screenshot_for_llm(self, screenshot_bytes: bytes, max_dimension: int = 2048) -> str:
         """Optimize screenshot size for LLM processing"""
         try:
-            from PIL import Image
-            import io
-            
-            # Open image
             image = Image.open(io.BytesIO(screenshot_bytes))
             original_width, original_height = image.size
             
             print(f"📸 Original: {original_width}x{original_height}")
             
-            # Resize if too large
+            # Resize if needed
             if original_width > max_dimension or original_height > max_dimension:
                 ratio = min(max_dimension / original_width, max_dimension / original_height)
                 new_width = int(original_width * ratio)
@@ -102,15 +135,13 @@ class WebsiteScraper:
                 
                 print(f"🔄 Resizing to: {new_width}x{new_height}")
                 
-                # High-quality resize
                 resized_image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
                 
-                # Convert back to bytes
                 buffer = io.BytesIO()
                 resized_image.save(buffer, format="PNG", optimize=True)
                 screenshot_bytes = buffer.getvalue()
                 
-                print(f"✅ Optimized size: {len(screenshot_bytes)//1024}KB")
+                print(f"✅ Optimized: {len(screenshot_bytes)//1024}KB")
             else:
                 print(f"✅ Size OK: {len(screenshot_bytes)//1024}KB")
             
@@ -206,7 +237,6 @@ class WebsiteScraper:
     async def _extract_color_palette(self, page: Page) -> List[str]:
         """Extract dominant colors from the page"""
         try:
-            # Take screenshot for color analysis (no quality param)
             screenshot_bytes = await page.screenshot(type="png")
             
             # Convert to PIL Image

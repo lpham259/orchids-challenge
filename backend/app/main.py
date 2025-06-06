@@ -1,19 +1,17 @@
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from fastapi.responses import HTMLResponse, Response
 from typing import Dict, List
 import asyncio
 import os
+import base64
 from datetime import datetime
 from dotenv import load_dotenv
-import logging
 
+# Load environment variables
 load_dotenv()
 
-logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
-
-# Import models and services
+# Import our models and services
 from .models import (
     ScrapeRequest, GenerationJob, GenerationResponse, 
     JobStatusResponse, JobStatus, ScrapedData
@@ -24,59 +22,57 @@ from app.llm_generator import LLMGenerator
 # Create FastAPI instance
 app = FastAPI(
     title="Website Cloner API",
-    description="API for scraping websites and generating HTML clones using LLM",
-    version="1.0.0"
+    description="AI-powered website cloning with PDF and screenshot analysis",
+    version="2.0.0"
 )
 
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # Frontend URLs
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# In-memory storage for jobs (in production, use a database)
+# In-memory storage for jobs (use database in production)
 jobs_db: Dict[str, GenerationJob] = {}
 
 # Initialize LLM service
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic")
-LLM_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+LLM_API_KEY = os.getenv("ANTHROPIC_API_KEY") or os.getenv("OPENAI_API_KEY")
 
 if not LLM_API_KEY:
-    print("Warning: No LLM API key found.")
+    print("⚠️ Warning: No LLM API key found. Set ANTHROPIC_API_KEY environment variable.")
 
 llm_generator = LLMGenerator(provider=LLM_PROVIDER, api_key=LLM_API_KEY) if LLM_API_KEY else None
 
 @app.get("/")
 async def root():
     return {
-        "message": "Website Cloner API", 
+        "message": "AI Website Cloner API", 
         "status": "running",
+        "features": ["PDF analysis", "Screenshot capture", "LLM generation"],
         "endpoints": {
-            "start_cloning": "POST /clone",
-            "check_status": "GET /status/{job_id}",
-            "get_result": "GET /result/{job_id}",
-            "list_jobs": "GET /jobs"
+            "clone": "POST /clone",
+            "status": "GET /status/{job_id}",
+            "result": "GET /result/{job_id}",
+            "preview": "GET /result/{job_id}/preview",
+            "jobs": "GET /jobs"
         }
     }
 
 @app.get("/health")
 async def health_check():
     return {
-        "status": "healthy", 
+        "status": "healthy",
         "service": "website-cloner-api",
-        "scraper_available": True,
         "llm_configured": llm_generator is not None,
         "llm_provider": LLM_PROVIDER if llm_generator else None
     }
 
 @app.post("/clone", response_model=GenerationResponse)
-async def start_website_cloning(
-    request: ScrapeRequest, 
-    background_tasks: BackgroundTasks
-):
+async def start_website_cloning(request: ScrapeRequest, background_tasks: BackgroundTasks):
     """Start the website cloning process"""
     
     # Create new job
@@ -89,7 +85,7 @@ async def start_website_cloning(
     return GenerationResponse(
         job_id=job.id,
         status=job.status,
-        message=f"Website cloning started. {'LLM Generation enabled.' if llm_generator else 'Using fallback mode - set ANTHROPIC_API_KEY for AI generation.'}"
+        message=f"Website cloning started. {'AI generation enabled.' if llm_generator else 'Set ANTHROPIC_API_KEY for AI generation.'}"
     )
 
 @app.get("/status/{job_id}", response_model=JobStatusResponse)
@@ -143,7 +139,7 @@ async def get_result(job_id: str):
         "job_id": job.id,
         "url": job.url,
         "generated_html": job.generated_html,
-        "scraped_data": job.scraped_data.dict() if job.scraped_data else None,
+        "scraped_data": job.scraped_data.model_dump() if job.scraped_data else None,
         "created_at": job.created_at,
         "completed_at": job.updated_at
     }
@@ -159,8 +155,31 @@ async def preview_result(job_id: str):
     
     if job.status != JobStatus.COMPLETED or not job.generated_html:
         return HTMLResponse(
-            content="<html><body><h1>Result not ready</h1><p>Job not completed or HTML not generated yet.</p></body></html>",
-            status_code=404
+            content=f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Preview Not Ready</title>
+                <style>
+                    body {{ font-family: system-ui; padding: 2rem; text-align: center; }}
+                    .status {{ background: #f0f0f0; padding: 1rem; border-radius: 8px; margin: 1rem 0; }}
+                </style>
+            </head>
+            <body>
+                <h1>Preview Not Ready</h1>
+                <div class="status">
+                    <p>Job Status: {job.status}</p>
+                    <p>Please wait for the job to complete, then refresh this page.</p>
+                </div>
+                <script>
+                    setTimeout(() => location.reload(), 5000);
+                </script>
+            </body>
+            </html>
+            """,
+            status_code=202
         )
     
     return HTMLResponse(content=job.generated_html)
@@ -204,61 +223,129 @@ async def delete_job(job_id: str):
     del jobs_db[job_id]
     return {"message": f"Job {job_id} deleted successfully"}
 
-# Background task functions
+# Debug endpoints
+@app.get("/debug/{job_id}/keys")
+async def debug_data_keys(job_id: str):
+    """Debug endpoint to see available data"""
+    
+    if job_id not in jobs_db:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    job = jobs_db[job_id]
+    
+    if not job.scraped_data:
+        return {"error": "No scraped data"}
+    
+    data = job.scraped_data.model_dump()
+    
+    return {
+        "available_keys": list(data.keys()),
+        "visual_inputs": {
+            "has_pdf": bool(data.get("pdf_base64")),
+            "has_screenshot": bool(data.get("screenshot_base64")),
+            "pdf_size": f"{len(data.get('pdf_base64', ''))} chars" if data.get("pdf_base64") else "none",
+            "screenshot_size": f"{len(data.get('screenshot_base64', ''))} chars" if data.get("screenshot_base64") else "none"
+        }
+    }
+
+@app.get("/debug/{job_id}/pdf")
+async def get_pdf(job_id: str):
+    """Download the generated PDF"""
+    
+    if job_id not in jobs_db:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    job = jobs_db[job_id]
+    
+    if not job.scraped_data:
+        raise HTTPException(status_code=404, detail="No scraped data available")
+    
+    scraped_dict = job.scraped_data.model_dump()
+    if not scraped_dict.get("pdf_base64"):
+        raise HTTPException(status_code=404, detail="No PDF available")
+    
+    pdf_bytes = base64.b64decode(scraped_dict["pdf_base64"])
+    
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename=scraped-page-{job_id}.pdf"}
+    )
+
+@app.get("/debug/{job_id}/screenshot")
+async def get_screenshot(job_id: str):
+    """Download the screenshot"""
+    
+    if job_id not in jobs_db:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    job = jobs_db[job_id]
+    
+    if not job.scraped_data or not job.scraped_data.screenshot_base64:
+        raise HTTPException(status_code=404, detail="No screenshot available")
+    
+    screenshot_bytes = base64.b64decode(job.scraped_data.screenshot_base64)
+    
+    return Response(
+        content=screenshot_bytes,
+        media_type="image/png",
+        headers={"Content-Disposition": "inline; filename=screenshot.png"}
+    )
+
+# Background task processing
 async def process_website_cloning(job_id: str, request: ScrapeRequest):
     """Background task to process website cloning"""
     
     job = jobs_db[job_id]
     
     try:
-        # Step 1: Update status to scraping
+        # Step 1: Scraping
         job.status = JobStatus.SCRAPING
         job.updated_at = datetime.now()
         
-        # Step 2: Scrape the website using enhanced scraper
         async with WebsiteScraper() as scraper:
             scraped_data_dict = await scraper.scrape_website(str(request.url))
             job.scraped_data = ScrapedData(**scraped_data_dict)
         
-        # Step 3: Update status to processing
+        # Step 2: Processing
         job.status = JobStatus.PROCESSING
         job.updated_at = datetime.now()
+        await asyncio.sleep(1)  # Brief pause for UI feedback
         
-        # Small delay to show progress
-        await asyncio.sleep(1)
-        
-        # Step 4: Update status to generating (for now, we'll create basic HTML)
+        # Step 3: Generation
         job.status = JobStatus.GENERATING
         job.updated_at = datetime.now()
         
-        # Step 5: Generate HTML using LLM or fallback
         if llm_generator:
-            print(f"Using LLM generation for job {job_id}")
-            generated_html = await llm_generator.generate_html_clone(scraped_data_dict)
-            job.generated_html = generated_html
+            print(f"🤖 Using LLM generation for job {job_id}")
+            try:
+                generated_html = await llm_generator.generate_html_clone(scraped_data_dict)
+                job.generated_html = generated_html
+                print(f"✅ LLM generation successful for job {job_id}")
+            except Exception as llm_error:
+                print(f"❌ LLM generation failed for job {job_id}: {str(llm_error)}")
+                job.generated_html = _create_enhanced_html(job.scraped_data)
         else:
-            print(f"Using fallback generation for job {job_id} (no LLM configured)")
+            print(f"⚠️ Using fallback generation for job {job_id} (no LLM configured)")
             job.generated_html = _create_enhanced_html(job.scraped_data)
         
-        # Step 6: Mark as completed
+        # Step 4: Completion
         job.status = JobStatus.COMPLETED
         job.updated_at = datetime.now()
         
     except Exception as e:
-        # Handle errors
         job.status = JobStatus.FAILED
         job.error_message = str(e)
         job.updated_at = datetime.now()
-        print(f"Error processing job {job_id}: {e}")
+        print(f"❌ Error processing job {job_id}: {e}")
 
 def _create_enhanced_html(scraped_data: ScrapedData) -> str:
-    """Create enhanced HTML from scraped data (placeholder for LLM integration)"""
+    """Create enhanced HTML from scraped data (fallback)"""
     
     title = scraped_data.title or "Cloned Website"
     colors = scraped_data.color_palette[:5] if scraped_data.color_palette else ["#333333", "#ffffff", "#007bff"]
     fonts = scraped_data.fonts[:3] if scraped_data.fonts else ["Arial", "sans-serif"]
     
-    # Use extracted colors and fonts in the generated HTML
     primary_color = colors[0] if colors else "#333333"
     bg_color = colors[1] if len(colors) > 1 else "#ffffff"
     accent_color = colors[2] if len(colors) > 2 else "#007bff"
@@ -298,17 +385,6 @@ def _create_enhanced_html(scraped_data: ScrapedData) -> str:
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
             margin-bottom: 2rem;
         }}
-        .color-palette {{
-            display: flex;
-            gap: 10px;
-            margin: 1rem 0;
-        }}
-        .color-swatch {{
-            width: 40px;
-            height: 40px;
-            border-radius: 4px;
-            border: 2px solid #ddd;
-        }}
         .info-grid {{
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
@@ -320,11 +396,6 @@ def _create_enhanced_html(scraped_data: ScrapedData) -> str:
             padding: 1rem;
             border-radius: 6px;
             border-left: 4px solid {accent_color};
-        }}
-        .font-preview {{
-            font-family: {primary_font};
-            font-size: 1.2em;
-            margin: 0.5rem 0;
         }}
     </style>
 </head>
@@ -348,30 +419,19 @@ def _create_enhanced_html(scraped_data: ScrapedData) -> str:
                 
                 <div class="info-card">
                     <h3>🎨 Color Palette</h3>
-                    <div class="color-palette">
-                        {"".join([f'<div class="color-swatch" style="background-color: {color}" title="{color}"></div>' for color in colors[:6]])}
-                    </div>
                     <p>Found {len(scraped_data.color_palette or [])} colors</p>
                 </div>
                 
                 <div class="info-card">
                     <h3>🔤 Typography</h3>
-                    {"".join([f'<div class="font-preview" style="font-family: {font}">{font}</div>' for font in fonts[:3]])}
                     <p>Found {len(scraped_data.fonts or [])} font families</p>
                 </div>
                 
                 <div class="info-card">
-                    <h3>📊 Page Structure</h3>
-                    <p>DOM elements analyzed</p>
-                    <p>Layout information extracted</p>
-                    <p>Styles computed</p>
+                    <h3>📊 Analysis Complete</h3>
+                    <p>PDF and screenshot captured</p>
+                    <p>Design data extracted</p>
                 </div>
-            </div>
-            
-            <div style="margin-top: 2rem; padding: 1rem; background: #e3f2fd; border-radius: 6px;">
-                <h3>🤖 Next Step: LLM Integration</h3>
-                <p>This enhanced HTML uses the extracted colors, fonts, and structure data. 
-                   In the next phase, we'll integrate an LLM to generate pixel-perfect recreations!</p>
             </div>
         </div>
     </main>
@@ -380,4 +440,4 @@ def _create_enhanced_html(scraped_data: ScrapedData) -> str:
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000, access_log=False)
