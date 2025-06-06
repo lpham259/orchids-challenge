@@ -7,25 +7,71 @@ import colorthief
 from PIL import Image
 import io
 from bs4 import BeautifulSoup, Comment
+import os
+from hyperbrowser.models import CreateSessionParams
 
 class WebsiteScraper:
-    def __init__(self, headless: bool = True):
+    def __init__(self, headless: bool = True, provider: str = "local", api_key: str = None):
         self.headless = headless
+        self.provider = provider
+        self.api_key = api_key or os.getenv("HYPERBROWSER_API_KEY")
         self.browser: Optional[Browser] = None
+        self.hb_client = None
+        self.hb_session = None
         
     async def __aenter__(self):
-        self.playwright = await async_playwright().start()
-        self.browser = await self.playwright.chromium.launch(headless=self.headless)
+        if self.provider == "hyperbrowser" and self.api_key:
+            try:
+                from hyperbrowser import Hyperbrowser
+                print(f"Using Hyperbrowser with API key: {self.api_key[:8]}...")
+
+                self.hb_client = Hyperbrowser(api_key=self.api_key)
+                print("Hyperbrowser client created")
+
+                self.hb_session = self.hb_client.sessions.create(
+                    params=CreateSessionParams(
+                        use_stealth=True
+                    )
+                )
+                print(f"🌐 Connected to Hyperbrowser session: {self.hb_session.id}")
+
+                # Connect via CDP
+                self.playwright = await async_playwright().start()
+                self.browser = await self.playwright.chromium.connect_over_cdp(self.hb_session.ws_endpoint)
+            except ImportError:
+                print("Hyperbrowser SDK not installed, falling back to local")
+                self.provider = "local"
+            except Exception as e:
+                print(f"Hyperbrowser connection failed: {e}, falling back to local")
+                self.provider = "local"
+
+        if self.provider == "local":
+            self.playwright = await async_playwright().start()
+            self.browser = await self.playwright.chromium.launch(headless=self.headless)
+
         return self
         
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         if self.browser:
             await self.browser.close()
-        await self.playwright.stop()
+        if self.playwright:
+            await self.playwright.stop()
+        
+        # Clean up Hyperbrowser session
+        if self.hb_client and self.hb_session:
+            try:
+                self.hb_client.sessions.stop(self.hb_session.id)
+                print("Hyperbrowser session cleaned up")
+            except Exception as e:
+                print(f"Error cleaning up Hyperbrowser session: {e}")
 
     async def scrape_website(self, url: str) -> Dict[str, Any]:
         """Complete website scraping with PDF and screenshot capture"""
-        page = await self.browser.new_page()
+        if self.provider == "hyperbrowser":
+            context = self.browser.contexts[0] if self.browser.contexts else await self.browser.new_context()
+            page = await context.new_page()
+        else:
+            page = await self.browser.new_page()
         
         try:
             print(f"🌐 Scraping: {url}")

@@ -303,7 +303,8 @@ async def process_website_cloning(job_id: str, request: ScrapeRequest):
         job.status = JobStatus.SCRAPING
         job.updated_at = datetime.now()
         
-        async with WebsiteScraper() as scraper:
+        provider = os.getenv("BROWSER_PROVIDER", "local")
+        async with WebsiteScraper(provider=provider) as scraper:
             scraped_data_dict = await scraper.scrape_website(str(request.url))
             job.scraped_data = ScrapedData(**scraped_data_dict)
         
