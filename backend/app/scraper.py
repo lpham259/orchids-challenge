@@ -26,22 +26,30 @@ class WebsiteScraper:
         await self.playwright.stop()
 
     async def scrape_website(self, url: str) -> Dict[str, Any]:
-        """Main scraping method that extracts all design context"""
+        """SIMPLIFIED: Focus on getting one good screenshot + basic data"""
         page = await self.browser.new_page()
         
         try:
             # Navigate to the page
             await page.goto(str(url), wait_until="networkidle", timeout=30000)
-            
-            # Wait for page to be fully loaded
             await page.wait_for_load_state("domcontentloaded")
-            await asyncio.sleep(2)  # Additional wait for dynamic content
+            await asyncio.sleep(2)  # Let dynamic content load
             
-            # Extract all data
+            # Set optimal viewport for desktop
+            await page.set_viewport_size({"width": 1920, "height": 1080})
+            await page.evaluate("window.scrollTo(0, 0)")
+            await asyncio.sleep(1)
+            
+            # Take ONE high-quality hero screenshot
+            print("📸 Capturing hero section...")
+            screenshot_base64 = await self._take_optimized_screenshot(page)
+            
+            # Extract other data
             scraped_data = {
                 "url": str(url),
                 "title": await page.title(),
-                "screenshot_base64": await self._take_screenshot(page),
+                "screenshot_base64": screenshot_base64,  # Main screenshot
+                "screenshot_hero": screenshot_base64,    # For compatibility
                 "dom_structure": await self._extract_dom_structure(page),
                 "styles": await self._extract_styles(page),
                 "color_palette": await self._extract_color_palette(page),
@@ -50,6 +58,7 @@ class WebsiteScraper:
                 "meta_data": await self._extract_meta_data(page)
             }
             
+            print(f"✅ Screenshot captured: {'Yes' if screenshot_base64 else 'Failed'}")
             return scraped_data
             
         except Exception as e:
@@ -57,55 +66,62 @@ class WebsiteScraper:
         finally:
             await page.close()
 
-    # Add this method to your WebsiteScraper class in scraper.py
-
-    async def _take_screenshot(self, page: Page) -> str:
-        """Take full page screenshot and encode as base64, with size limits for LLM"""
+    async def _take_optimized_screenshot(self, page: Page) -> str:
+        """Take one optimized screenshot for LLM analysis"""
         try:
-            # Take screenshot
-            screenshot_bytes = await page.screenshot(full_page=True, type="png")
+            # Take hero section screenshot (no quality parameter for PNG)
+            screenshot_bytes = await page.screenshot(
+                type="png",
+                full_page=False  # Just viewport, not full page
+            )
             
-            # Open with PIL to check/resize dimensions
+            # Optimize for Claude's limits
+            return await self._optimize_screenshot_for_llm(screenshot_bytes)
+            
+        except Exception as e:
+            print(f"⚠️ Screenshot error: {e}")
+            return ""
+
+    async def _optimize_screenshot_for_llm(self, screenshot_bytes: bytes, max_dimension: int = 2048) -> str:
+        """Optimize screenshot size for LLM processing"""
+        try:
             from PIL import Image
             import io
             
+            # Open image
             image = Image.open(io.BytesIO(screenshot_bytes))
             original_width, original_height = image.size
             
-            print(f"📸 Original screenshot: {original_width}x{original_height}")
+            print(f"📸 Original: {original_width}x{original_height}")
             
-            # Claude's limit is 8000 pixels on any dimension
-            max_dimension = 7500  # Leave some buffer
-            
+            # Resize if too large
             if original_width > max_dimension or original_height > max_dimension:
-                # Calculate resize ratio
                 ratio = min(max_dimension / original_width, max_dimension / original_height)
                 new_width = int(original_width * ratio)
                 new_height = int(original_height * ratio)
                 
-                print(f"🔄 Resizing to: {new_width}x{new_height} (ratio: {ratio:.2f})")
+                print(f"🔄 Resizing to: {new_width}x{new_height}")
                 
-                # Resize image
+                # High-quality resize
                 resized_image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
                 
                 # Convert back to bytes
                 buffer = io.BytesIO()
-                resized_image.save(buffer, format="PNG", optimize=True, quality=85)
+                resized_image.save(buffer, format="PNG", optimize=True)
                 screenshot_bytes = buffer.getvalue()
                 
-                print(f"✅ Screenshot resized successfully")
+                print(f"✅ Optimized size: {len(screenshot_bytes)//1024}KB")
             else:
-                print(f"✅ Screenshot size OK, no resize needed")
+                print(f"✅ Size OK: {len(screenshot_bytes)//1024}KB")
             
             return base64.b64encode(screenshot_bytes).decode()
             
         except Exception as e:
-            print(f"⚠️ Screenshot error: {e}")
-            return ""  # Return empty string if screenshot fails
+            print(f"⚠️ Screenshot optimization error: {e}")
+            return base64.b64encode(screenshot_bytes).decode()
 
     async def _extract_dom_structure(self, page: Page) -> Dict[str, Any]:
         """Extract simplified DOM structure"""
-        # Get the HTML content
         content = await page.content()
         soup = BeautifulSoup(content, 'html.parser')
         
@@ -121,11 +137,11 @@ class WebsiteScraper:
         
         return {
             "structure": structure,
-            "text_content": soup.get_text(separator=' ', strip=True)[:5000],  # Limit text
+            "text_content": soup.get_text(separator=' ', strip=True)[:5000],
             "links": [{"text": a.get_text(strip=True), "href": a.get('href')} 
-                     for a in soup.find_all('a', href=True)][:20],  # Limit links
+                     for a in soup.find_all('a', href=True)][:20],
             "images": [{"alt": img.get('alt', ''), "src": img.get('src')} 
-                      for img in soup.find_all('img', src=True)][:10]  # Limit images
+                      for img in soup.find_all('img', src=True)][:10]
         }
 
     def _parse_element(self, element, max_depth=3, current_depth=0):
@@ -190,7 +206,7 @@ class WebsiteScraper:
     async def _extract_color_palette(self, page: Page) -> List[str]:
         """Extract dominant colors from the page"""
         try:
-            # Take a smaller screenshot for color analysis
+            # Take screenshot for color analysis (no quality param)
             screenshot_bytes = await page.screenshot(type="png")
             
             # Convert to PIL Image

@@ -7,8 +7,11 @@ import asyncio
 import os
 from datetime import datetime
 from dotenv import load_dotenv
+import logging
 
 load_dotenv()
+
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
 # Import models and services
 from .models import (
