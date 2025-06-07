@@ -1,5 +1,5 @@
 import asyncio
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import anthropic
 import base64
 from PIL import Image
@@ -33,18 +33,24 @@ class LLMGenerator:
         print("✅ AI generation completed!")
         return self._extract_html_code(html_code)
 
-    def _get_best_visual_input(self, scraped_data: Dict[str, Any]) -> tuple[Optional[str], str]:
-        """Get the best visual input - PDF priority, then screenshot"""
+    def _get_best_visual_input(self, scraped_data: Dict[str, Any]) -> tuple[Optional[Any], str]:
+        """Get the best visual input - Full page screenshots priority"""
         
         print("🔍 Looking for visual inputs...")
         
-        # Priority 1: PDF (captures complete page layout)
+        # Priority 1: Full page screenshots (NEW)
+        full_screenshots = scraped_data.get("full_page_screenshots")
+        if full_screenshots and len(full_screenshots) > 0:
+            print(f"📸 Found {len(full_screenshots)} full-page screenshots")
+            return full_screenshots, "screenshots"
+        
+        # Priority 2: PDF (fallback)
         pdf_data = scraped_data.get("pdf_base64")
         if pdf_data:
             print(f"📄 Found PDF: {len(pdf_data)} characters")
             return pdf_data, "pdf"
         
-        # Priority 2: Screenshot (hero section)
+        # Priority 3: Single screenshot (last resort)
         screenshot_candidates = [
             ("screenshot_base64", scraped_data.get("screenshot_base64")),
             ("screenshot_hero", scraped_data.get("screenshot_hero")),
@@ -55,9 +61,7 @@ class LLMGenerator:
                 print(f"📸 Found {name}: {len(screenshot)} characters")
                 if self._validate_screenshot_size(screenshot):
                     print(f"✅ Using {name} (size validated)")
-                    return screenshot, "image"
-                else:
-                    print(f"❌ {name} too large")
+                    return [screenshot], "screenshots"
         
         print("❌ No valid visual inputs found!")
         return None, "none"
@@ -80,12 +84,20 @@ class LLMGenerator:
             return False
 
     async def _direct_visual_clone(self, visual_data: str, input_type: str, scraped_data: Dict[str, Any]) -> str:
-        """Generate HTML from visual input - PDF priority"""
+        """Generate HTML from visual input - Screenshots priority"""
+    
+        if input_type == "screenshots":
+            print(f"📸 Processing screenshots...")
+            if isinstance(visual_data, list) and len(visual_data) > 1:
+                return await self._process_multiple_screenshots(visual_data, scraped_data)
+            else:
+                # Single screenshot
+                screenshot = visual_data[0] if isinstance(visual_data, list) else visual_data
+                return await self._process_image_input(screenshot, scraped_data)
         
-        if input_type == "pdf":
+        elif input_type == "pdf":
+            # ... existing PDF logic ...
             print("📄 Processing PDF with Claude's official API...")
-            
-            # Try PDF directly with Claude's document API
             pdf_result = await self._process_pdf_input(visual_data, scraped_data)
             if pdf_result:
                 return pdf_result
@@ -123,6 +135,7 @@ Your task: Create a single HTML page that includes ALL the content and sections 
         user_message = """This PDF shows a complete website across multiple pages. Please create ONE complete HTML file that includes ALL the content from ALL pages of this PDF. 
 
 Make sure to recreate:
+- Prioritize visual replication
 - ALL sections shown across all PDF pages
 - The complete scrollable webpage content
 - All visual elements, colors, and layout from every page
@@ -188,6 +201,65 @@ Can you visually duplicate this COMPLETE multi-page PDF into one comprehensive H
             except Exception as e2:
                 print(f"❌ Simple prompt also failed: {str(e2)}")
                 return None
+    
+    async def _process_multiple_screenshots(self, screenshots: List[str], scraped_data: Dict[str, Any]) -> str:
+        """Process multiple screenshots to create complete webpage"""
+        
+        print(f"📸 Processing {len(screenshots)} screenshots for complete webpage")
+        
+        system_prompt = """You are an expert web developer. I'm providing you with multiple screenshots that show a complete webpage from top to bottom.
+
+    These screenshots were taken by scrolling down the page, so they show the ENTIRE website content in sequence.
+
+    Your task: Create ONE complete HTML page that includes ALL the content shown across ALL these screenshots in the correct order."""
+
+        # Build the user message with all screenshots
+        content = [
+            {
+                "type": "text", 
+                "text": f"""I'm providing {len(screenshots)} sequential screenshots of a complete webpage taken from top to bottom.
+
+    Please create ONE comprehensive HTML file that recreates ALL the content shown across these {len(screenshots)} screenshots in the correct order.
+
+    Make sure to:
+    - Prioritize visual replication
+    - Include ALL sections from every screenshot
+    - Maintain the correct top-to-bottom sequence
+    - Recreate all visual elements, colors, and layouts
+    - Create one seamless scrollable webpage
+
+    Can you create a complete HTML page from these {len(screenshots)} sequential screenshots?"""
+            }
+        ]
+        
+        # Add all screenshots to the message
+        for i, screenshot in enumerate(screenshots):
+            content.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": screenshot
+                }
+            })
+
+        try:
+            messages = [{"role": "user", "content": content}]
+            
+            response = await self.client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=8000,
+                system=system_prompt,
+                messages=messages
+            )
+            
+            print("✅ Multiple screenshots processed successfully!")
+            return response.content[0].text
+            
+        except Exception as e:
+            print(f"❌ Multiple screenshot processing error: {e}")
+            # Fallback to first screenshot only
+            return await self._process_image_input(screenshots[0], scraped_data)
 
     async def _process_image_input(self, image_data: str, scraped_data: Dict[str, Any]) -> str:
         """Process image input with the same direct approach"""

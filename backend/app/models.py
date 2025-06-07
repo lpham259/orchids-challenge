@@ -22,7 +22,9 @@ class ScrapedData(BaseModel):
     url: str
     title: Optional[str] = None
     screenshot_base64: Optional[str] = None
-    pdf_base64: Optional[str] = None
+    full_page_screenshots: Optional[List[str]] = None
+    screenshot_count: Optional[int] = None
+    pdf_base64: Optional[str] = None 
     dom_structure: Optional[Dict[str, Any]] = None
     styles: Optional[Dict[str, Any]] = None
     color_palette: Optional[List[str]] = None

@@ -89,8 +89,8 @@ class WebsiteScraper:
             await asyncio.sleep(1)
             
             # Capture visual data
-            print("📸 Capturing hero screenshot...")
-            screenshot_base64 = await self._take_optimized_screenshot(page)
+            print("📸 Capturing full-page screenshots...")
+            full_page_screenshots = await self._take_full_page_screenshots(page)
             
             print("📄 Generating full page PDF...")
             pdf_base64 = await self._generate_page_pdf(page)
@@ -100,8 +100,9 @@ class WebsiteScraper:
             scraped_data = {
                 "url": str(url),
                 "title": await page.title(),
-                "screenshot_base64": screenshot_base64,
-                "screenshot_hero": screenshot_base64,  # For compatibility
+                "screenshot_base64": full_page_screenshots[0] if full_page_screenshots else "",
+                "full_page_screenshots": full_page_screenshots,
+                "screenshot_count": len(full_page_screenshots),
                 "pdf_base64": pdf_base64,
                 "dom_structure": await self._extract_dom_structure(page),
                 "styles": await self._extract_styles(page),
@@ -112,7 +113,7 @@ class WebsiteScraper:
             }
             
             print(f"✅ Scraping complete:")
-            print(f"   📸 Screenshot: {'✅' if screenshot_base64 else '❌'}")
+            print(f"   📸 Screenshot: {'✅' if full_page_screenshots[0] else '❌'}")
             print(f"   📄 PDF: {'✅' if pdf_base64 else '❌'}")
             print(f"   🎨 Colors: {len(scraped_data.get('color_palette', []))}")
             print(f"   🔤 Fonts: {len(scraped_data.get('fonts', []))}")
@@ -123,6 +124,64 @@ class WebsiteScraper:
             raise Exception(f"Failed to scrape website: {str(e)}")
         finally:
             await page.close()
+
+    async def _take_full_page_screenshots(self, page: Page) -> List[str]:
+        """Take multiple screenshots covering the entire page height"""
+        try:
+            print("📸 Taking full-page screenshot sequence...")
+            
+            # Get page dimensions
+            page_height = await page.evaluate("document.body.scrollHeight")
+            viewport_height = await page.evaluate("window.innerHeight")
+            
+            print(f"📏 Page height: {page_height}px, Viewport: {viewport_height}px")
+            
+            screenshots = []
+            current_position = 0
+            screenshot_count = 0
+            
+            # Calculate overlap to ensure we don't miss content
+            overlap = 100  # 100px overlap between screenshots
+            scroll_step = viewport_height - overlap
+            
+            estimated_screenshots = max(1, int(page_height / scroll_step))
+            print(f"📸 Estimated {estimated_screenshots} screenshots at full quality")
+            
+            while current_position < page_height:
+                screenshot_count += 1
+                print(f"📸 Taking screenshot {screenshot_count} at position {current_position}px")
+                
+                # Scroll to position
+                await page.evaluate(f"window.scrollTo(0, {current_position})")
+                await asyncio.sleep(0.5)  # Wait for scroll to complete
+                
+                # Take screenshot of current viewport
+                screenshot_bytes = await page.screenshot(
+                    type="png",
+                    full_page=False  # Only current viewport
+                )
+                
+                # Preserve original quality (only resize if needed)
+                optimized_screenshot = await self._optimize_screenshot_for_llm(screenshot_bytes)
+                screenshots.append(optimized_screenshot)
+                
+                # Move to next position
+                current_position += scroll_step
+                
+                # Safety check to prevent infinite loops
+                if screenshot_count >= 10:  # Max 10 screenshots
+                    print("⚠️ Max screenshots reached, stopping")
+                    break
+            
+            total_size_mb = len(screenshots) * 250 / 1024  # Estimate ~250KB per screenshot
+            print(f"✅ Captured {len(screenshots)} screenshots (~{total_size_mb:.1f}MB total)")
+            return screenshots
+            
+        except Exception as e:
+            print(f"⚠️ Full-page screenshot error: {e}")
+            # Fallback to single screenshot
+            screenshot_bytes = await page.screenshot(type="png", full_page=False)
+            return [await self._optimize_screenshot_for_llm(screenshot_bytes)]
 
     async def _take_optimized_screenshot(self, page: Page) -> str:
         """Take optimized hero section screenshot"""
@@ -168,14 +227,15 @@ class WebsiteScraper:
             return ""
 
     async def _optimize_screenshot_for_llm(self, screenshot_bytes: bytes, max_dimension: int = 2048) -> str:
-        """Optimize screenshot size for LLM processing"""
+        """Preserve original screenshot quality, only resize if too large"""
         try:
             image = Image.open(io.BytesIO(screenshot_bytes))
             original_width, original_height = image.size
+            original_size_kb = len(screenshot_bytes) // 1024
             
-            print(f"📸 Original: {original_width}x{original_height}")
+            print(f"📸 Original: {original_width}x{original_height} ({original_size_kb}KB)")
             
-            # Resize if needed
+            # Only resize if really necessary (Claude's limits)
             if original_width > max_dimension or original_height > max_dimension:
                 ratio = min(max_dimension / original_width, max_dimension / original_height)
                 new_width = int(original_width * ratio)
@@ -185,13 +245,15 @@ class WebsiteScraper:
                 
                 resized_image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
                 
+                # Keep as PNG for quality preservation
                 buffer = io.BytesIO()
                 resized_image.save(buffer, format="PNG", optimize=True)
                 screenshot_bytes = buffer.getvalue()
                 
-                print(f"✅ Optimized: {len(screenshot_bytes)//1024}KB")
+                final_size_kb = len(screenshot_bytes) // 1024
+                print(f"✅ Resized: {new_width}x{new_height} ({final_size_kb}KB)")
             else:
-                print(f"✅ Size OK: {len(screenshot_bytes)//1024}KB")
+                print(f"✅ Size OK, preserving original quality: {original_size_kb}KB")
             
             return base64.b64encode(screenshot_bytes).decode()
             

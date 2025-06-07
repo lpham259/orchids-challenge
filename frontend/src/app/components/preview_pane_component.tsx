@@ -77,6 +77,75 @@ export default function EnhancedPreviewPane({ jobResult, currentJob }: PreviewPa
     setIsFullscreen(!isFullscreen);
   };
 
+  const forceScrollableHTML = (html: string): string => {
+    // Much more aggressive CSS to force scrolling
+    const scrollingCSS = `
+      <style>
+        /* Nuclear option - force everything to be scrollable */
+        html, body {
+          overflow: auto !important;
+          overflow-x: auto !important;
+          overflow-y: auto !important;
+          height: auto !important;
+          min-height: 100vh !important;
+          max-height: none !important;
+          position: static !important;
+          margin: 0 !important;
+        }
+        
+        /* Override ALL elements that might block scrolling */
+        *, *:before, *:after {
+          overflow: visible !important;
+          overflow-x: visible !important;
+          overflow-y: visible !important;
+          height: auto !important;
+          min-height: auto !important;
+          max-height: none !important;
+          position: static !important;
+        }
+        
+        /* Specific overrides for common problematic selectors */
+        .hero-section,
+        [class*="hero"],
+        [class*="container"],
+        [class*="wrapper"],
+        main,
+        section,
+        div {
+          overflow: visible !important;
+          height: auto !important;
+          min-height: auto !important;
+          max-height: none !important;
+          position: relative !important;
+        }
+        
+        /* Force the page to be tall enough to scroll */
+        body {
+          min-height: 200vh !important;
+          padding-bottom: 100px !important;
+        }
+        
+        /* Remove any fixed positioning that might interfere */
+        [style*="position: fixed"],
+        [style*="position:fixed"] {
+          position: relative !important;
+        }
+      </style>
+    `;
+    
+    // More robust insertion logic
+    if (html.includes('</head>')) {
+      return html.replace('</head>', scrollingCSS + '</head>');
+    } else if (html.includes('<head>')) {
+      return html.replace('<head>', '<head>' + scrollingCSS);
+    } else if (html.includes('<body')) {
+      return html.replace('<body', scrollingCSS + '<body');
+    } else {
+      // Nuclear option - wrap everything
+      return `<!DOCTYPE html><html><head>${scrollingCSS}</head><body style="min-height: 200vh; padding: 20px;">${html}</body></html>`;
+    }
+  };
+
   // Show loading state when job is in progress
   if (currentJob && currentJob.status !== 'completed') {
     return (
@@ -91,7 +160,7 @@ export default function EnhancedPreviewPane({ jobResult, currentJob }: PreviewPa
               {currentJob.status === 'pending' && 'Initializing...'}
             </p>
             <p className="text-sm text-gray-600 mt-2">
-              This may take 30-60 seconds
+              This may take a few minutes
             </p>
           </div>
         </div>
@@ -200,22 +269,16 @@ export default function EnhancedPreviewPane({ jobResult, currentJob }: PreviewPa
             <div>
               <span className="font-medium">Preview:</span> {jobResult.url}
             </div>
-            <div className="text-xs text-gray-500">
-              Scroll within the preview to see full website
-            </div>
           </div>
           <div className="relative">
             <iframe
               key={iframeKey}
-              srcDoc={jobResult.generated_html}
+              srcDoc={forceScrollableHTML(jobResult.generated_html)}
               className={`w-full border-0 ${
                 isFullscreen 
                   ? 'h-[calc(100vh-120px)]' 
                   : 'h-[600px]'
               }`}
-              sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-pointer-lock"
-              style={{ overflow: 'auto' }}
-              scrolling="yes"
               title="Website Preview"
             />
             {/* Loading overlay */}
