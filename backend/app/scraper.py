@@ -8,7 +8,6 @@ from PIL import Image
 import io
 from bs4 import BeautifulSoup, Comment
 import os
-from hyperbrowser.models import CreateSessionParams
 
 class WebsiteScraper:
     def __init__(self, headless: bool = True, provider: str = "local", api_key: str = None):
@@ -22,15 +21,18 @@ class WebsiteScraper:
     async def __aenter__(self):
         if self.provider == "hyperbrowser" and self.api_key:
             try:
-                from hyperbrowser import Hyperbrowser
+                from hyperbrowser import AsyncHyperbrowser
+                from hyperbrowser.models import CreateSessionParams
+
                 print(f"Using Hyperbrowser with API key: {self.api_key[:8]}...")
 
-                self.hb_client = Hyperbrowser(api_key=self.api_key)
+                self.hb_client = AsyncHyperbrowser(api_key=self.api_key)
                 print("Hyperbrowser client created")
 
-                self.hb_session = self.hb_client.sessions.create(
+                self.hb_session = await self.hb_client.sessions.create(
                     params=CreateSessionParams(
-                        use_stealth=True
+                        use_stealth = True,
+                        adblock = True
                     )
                 )
                 print(f"🌐 Connected to Hyperbrowser session: {self.hb_session.id}")
@@ -60,7 +62,7 @@ class WebsiteScraper:
         # Clean up Hyperbrowser session
         if self.hb_client and self.hb_session:
             try:
-                self.hb_client.sessions.stop(self.hb_session.id)
+                await self.hb_client.sessions.stop(self.hb_session.id)
                 print("Hyperbrowser session cleaned up")
             except Exception as e:
                 print(f"Error cleaning up Hyperbrowser session: {e}")
