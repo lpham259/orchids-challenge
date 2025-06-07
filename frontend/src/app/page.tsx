@@ -164,7 +164,7 @@ export default function Home() {
             </div>
             <div className="flex items-center space-x-4">
               <span className="text-xs text-gray-500">
-                Powered by Claude & Playwright
+                Powered by Claude & Hyperbrowser
               </span>
             </div>
           </div>

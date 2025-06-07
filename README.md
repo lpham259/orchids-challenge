@@ -1,6 +1,6 @@
 # Website Cloner
 
-AI-powered website cloning tool that generates HTML replicas from any website URL using PDF analysis and Claude AI.
+AI-powered website cloning tool that generates HTML replicas from any website URL using screenshot, PDF analysis, and other page content through Claude AI.
 
 ## Features
 
